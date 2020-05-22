@@ -37,7 +37,7 @@ public class ChurnFighter: NSObject {
     private let receiptHashKey="receiptHash"
     private let userIdKey="userIdKey"
     
-
+    @objc
     public func initialize(apiKey: String, secret: String) {
         
         self.storeObserver = StoreObserver()
@@ -46,23 +46,26 @@ public class ChurnFighter: NSObject {
         addIAPObserver()
     }
     
+    @objc
     public func cleanup(){
         removeIAPObserver()
     }
     
-    
+    @objc
     public func setUserEmail(_ email: String) {
         
         self.email = email
         uploadToServer()
     }
     
+    @objc
     public func setUserLocale(_ locale: Locale) {
 
         self.locale = locale
         uploadToServer()
     }
     
+    @objc
     public func didRegisterForRemoteNotificationsWithDeviceToken(_ deviceToken: Data) {
      
         self.deviceToken = deviceToken.map { String(format: "%02.2hhx", $0) }.joined()
