@@ -43,23 +43,13 @@ public class ChurnFighter: NSObject {
         self.storeObserver = StoreObserver()
         self.apiKey = apiKey
         self.secret = secret
+        addIAPObserver()
     }
     
-    public func addIAPObserver() {
-        
-        if let storeObserver=storeObserver {
-            storeObserver.delegate = self
-            SKPaymentQueue.default().add(storeObserver)
-        }
+    public func cleanup(){
+        removeIAPObserver()
     }
     
-    public func removeIAPObserver() {
-        
-        if let storeObserver=storeObserver {
-            storeObserver.delegate = nil
-            SKPaymentQueue.default().remove(storeObserver)
-        }
-    }
     
     public func setUserEmail(_ email: String) {
         
@@ -110,13 +100,13 @@ public class ChurnFighter: NSObject {
     
     internal func loadReceipt() {
         
-        guard let deviceReceiptString = receiptString(),
-            let receiptHash = getReceiptHash(receipt: deviceReceiptString) else {
-                
-                return
+        guard let deviceReceiptString = receiptString() else {
+            
+            return
         }
+        let receiptHash = getReceiptHash(receipt: deviceReceiptString)
         
-        if let previousReceiptHash = userDefaults?.string(forKey: receiptHashKey),
+        if let previousReceiptHash = userDefaults?.integer(forKey: receiptHashKey),
             previousReceiptHash == receiptHash {
             
             return
@@ -137,7 +127,24 @@ public class ChurnFighter: NSObject {
 }
 
 private extension ChurnFighter {
-        
+      
+    func addIAPObserver() {
+           
+           if let storeObserver=storeObserver {
+               storeObserver.delegate = self
+               SKPaymentQueue.default().add(storeObserver)
+           }
+       }
+       
+
+    func removeIAPObserver() {
+       
+       if let storeObserver=storeObserver {
+           storeObserver.delegate = nil
+           SKPaymentQueue.default().remove(storeObserver)
+       }
+    }
+
     func httpPost(url: URL, jsonData: Data) {
         guard let apiKey=apiKey,
             let secret=secret,
@@ -177,19 +184,11 @@ private extension ChurnFighter {
         return hash.finalize()
     }
     
-    func getReceiptHash(receipt: String)->String? {
+    func getReceiptHash(receipt: String)->Int {
         
-        guard let data = receipt.data(using: .utf8) else { return nil }
-
-        let hash = data.withUnsafeBytes { (bytes: UnsafeRawBufferPointer) -> [UInt8] in
-            var hash: [UInt8] = [UInt8](repeating: 0, count: Int(CC_SHA1_DIGEST_LENGTH))
-            CC_SHA1(bytes.baseAddress, CC_LONG(data.count), &hash)
-            return hash
-        }
-
-        let hashString = hash.map { String(format: "%02x", $0) }.joined()
-
-        return hashString
+        var hash = Hasher()
+        hash.combine(receipt)
+        return hash.finalize()
     }
     
     func generateUserInfo() -> UserInfo {
