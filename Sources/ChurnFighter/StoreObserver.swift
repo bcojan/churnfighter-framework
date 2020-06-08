@@ -22,7 +22,7 @@ class StoreObserver: NSObject, SKPaymentTransactionObserver {
             
             if let originalTransaction=transaction.original,
                 let originalTransactionIdentifier = originalTransaction.transactionIdentifier {
-                delegate?.setOriginalTransactionId(originalTransactionIdentifier)
+                delegate?.addOriginalTransactionId(originalTransactionIdentifier)
             }
             
             switch transaction.transactionState {

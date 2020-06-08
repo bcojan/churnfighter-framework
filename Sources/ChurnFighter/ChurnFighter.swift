@@ -18,7 +18,8 @@ struct UserInfo: Encodable, Hashable {
     let timeZone: String?
     let email: String?
     let deviceToken: String?
-    let originalTransactionId: String?
+    let originalTransactionIds: Set<String>
+    let customInfo: [String:String]?
 }
 
 @objc
@@ -30,7 +31,8 @@ public class ChurnFighter: NSObject {
     private var email: String?
     private var locale: Locale?
     private var deviceToken: String?
-    private var originalTransactionId: String?
+    private var originalTransactionIds: Set<String> = []
+    private var customInfo: [String: String] = [:]
     
     private let userDefaults = UserDefaults(suiteName: "churnFighter")
     private let userHashKey="userHash"
@@ -44,6 +46,7 @@ public class ChurnFighter: NSObject {
         self.apiKey = apiKey
         self.secret = secret
         addIAPObserver()
+        loadReceipt()
     }
     
     @objc
@@ -66,6 +69,13 @@ public class ChurnFighter: NSObject {
     }
     
     @objc
+    public func setUserProperty(key: String, value: String) {
+
+        customInfo[key] = value
+        uploadToServer()
+    }
+    
+    @objc
     public func didRegisterForRemoteNotificationsWithDeviceToken(_ deviceToken: Data) {
      
         self.deviceToken = deviceToken.map { String(format: "%02.2hhx", $0) }.joined()
@@ -74,9 +84,9 @@ public class ChurnFighter: NSObject {
     
     
     // INTERNAL
-    internal func setOriginalTransactionId(_ transactionId: String) {
+    internal func addOriginalTransactionId(_ transactionId: String) {
         
-        self.originalTransactionId = transactionId
+        self.originalTransactionIds.insert(transactionId)
         uploadToServer()
     }
     
@@ -90,6 +100,8 @@ public class ChurnFighter: NSObject {
              
             return
         }
+        
+        print(userInfo)
         
         let userId = userID()
         if let url = URL(string: "https://api.churnfighter.io/user/\(userId)"),
@@ -208,7 +220,8 @@ private extension ChurnFighter {
                                     timeZone: TimeZone.current.identifier,
                                     email: email,
                                     deviceToken: deviceToken,
-                                    originalTransactionId: originalTransactionId)
+                                    originalTransactionIds: originalTransactionIds,
+                                    customInfo: customInfo)
         #elseif os(OSX)
             let userInfo = UserInfo(locale: userLocaleIdentifier,
                                     iosVersion: "macosx",
@@ -217,7 +230,8 @@ private extension ChurnFighter {
                                     timeZone: TimeZone.current.identifier,
                                     email: email,
                                     deviceToken: deviceToken,
-                                    originalTransactionId: originalTransactionId)
+                                    originalTransactionIds: originalTransactionIds,
+                                    customInfo: customInfo)
         #endif
         
         
