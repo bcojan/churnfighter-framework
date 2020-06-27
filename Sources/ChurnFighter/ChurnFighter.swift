@@ -18,8 +18,20 @@ struct UserInfo: Encodable, Hashable {
     let timeZone: String?
     let email: String?
     let deviceToken: String?
-    let originalTransactionIds: Set<String>
+    let originalTransactionId: String?
     let customInfo: [String:String]?
+}
+
+
+public class Offer: NSObject, Decodable {
+//    public struct Product: Decodable {
+//        public let productId: String
+//        public let description: String?
+//    }
+    public let title: String
+    public let body: String
+    public let productId: String
+    public let productDescription: String?
 }
 
 @objc
@@ -31,7 +43,7 @@ public class ChurnFighter: NSObject {
     private var email: String?
     private var locale: Locale?
     private var deviceToken: String?
-    private var originalTransactionIds: Set<String> = []
+    private var originalTransactionId: String?
     private var customInfo: [String: String] = [:]
     
     private let userDefaults = UserDefaults(suiteName: "churnFighter")
@@ -82,11 +94,39 @@ public class ChurnFighter: NSObject {
         uploadToServer()
     }
     
+    @objc
+    public func offerFromNotificationResponse(response: UNNotificationResponse) -> Offer? {
+        let userInfo = response.notification.request.content.userInfo
+        guard let encodedOffer = userInfo["offer"] as? String,
+            let offer = decodeOffer(encodedOffer: encodedOffer) else { return nil }
+        
+        return offer
+    }
+    
+    @objc
+    public func offerFromUniversalLink(userActivity: NSUserActivity) -> Offer? {
+        
+        // Get URL components from the incoming user activity
+        guard userActivity.activityType == NSUserActivityTypeBrowsingWeb,
+           let incomingURL = userActivity.webpageURL,
+           let components = NSURLComponents(url: incomingURL, resolvingAgainstBaseURL: true) else {
+           return nil
+        }
+
+        guard
+            let params = components.queryItems,
+            let offer = params.first(where: {$0.name == "offer"}),
+            let encodedOffer = offer.value,
+            let decodedOffer = decodeOffer(encodedOffer: encodedOffer) else { return nil }
+        
+        return decodedOffer
+    }
+    
     
     // INTERNAL
-    internal func addOriginalTransactionId(_ transactionId: String) {
-        
-        self.originalTransactionIds.insert(transactionId)
+    
+    func setOriginalTransactionId(originalTransactionId: String){
+        self.originalTransactionId = originalTransactionId
         uploadToServer()
     }
     
@@ -220,7 +260,7 @@ private extension ChurnFighter {
                                     timeZone: TimeZone.current.identifier,
                                     email: email,
                                     deviceToken: deviceToken,
-                                    originalTransactionIds: originalTransactionIds,
+                                    originalTransactionId: originalTransactionId,
                                     customInfo: customInfo)
         #elseif os(OSX)
             let userInfo = UserInfo(locale: userLocaleIdentifier,
@@ -230,7 +270,7 @@ private extension ChurnFighter {
                                     timeZone: TimeZone.current.identifier,
                                     email: email,
                                     deviceToken: deviceToken,
-                                    originalTransactionIds: originalTransactionIds,
+                                    originalTransactionId: originalTransactionId,
                                     customInfo: customInfo)
         #endif
         
@@ -245,5 +285,14 @@ private extension ChurnFighter {
         let receiptData = try? Data(contentsOf: receiptUrl, options: .alwaysMapped) else { return nil }
        
        return receiptData.base64EncodedString()
+    }
+    
+    func decodeOffer(encodedOffer: String) -> Offer? {
+        
+        guard let data = Data(base64Encoded: encodedOffer),
+//            let decodedOffer = String(data: data, encoding: .utf8),
+        let offer =  try? JSONDecoder().decode(Offer.self, from: data) else { return nil}
+        
+        return offer
     }
 }
