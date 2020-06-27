@@ -22,7 +22,7 @@ struct UserInfo: Encodable, Hashable {
     let customInfo: [String:String]?
 }
 
-
+@objcMembers
 public class Offer: NSObject, Decodable {
 //    public struct Product: Decodable {
 //        public let productId: String
