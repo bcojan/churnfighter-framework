@@ -22,16 +22,28 @@ struct UserInfo: Encodable, Hashable {
     let customInfo: [String:String]?
 }
 
+@objc
+public protocol Action: NSObjectProtocol {
+    var title: String { get }
+    var body: String { get }
+}
+
 @objcMembers
-public class Offer: NSObject, Decodable {
-//    public struct Product: Decodable {
-//        public let productId: String
-//        public let description: String?
-//    }
+public class Offer: NSObject, Action, Decodable {
     public let title: String
     public let body: String
     public let productId: String
+    public let offerId: String?
+    public let offerType: String
     public let productDescription: String?
+}
+
+@objcMembers
+public class UpdatePaymentDetails: NSObject, Action , Decodable {
+    public let title: String
+    public let body: String
+    public let cta: String
+    public let url: String
 }
 
 @objc
@@ -95,33 +107,92 @@ public class ChurnFighter: NSObject {
     }
     
     @objc
-    public func offerFromNotificationResponse(response: UNNotificationResponse) -> Offer? {
-        let userInfo = response.notification.request.content.userInfo
-        guard let encodedOffer = userInfo["offer"] as? String,
-            let offer = decodeOffer(encodedOffer: encodedOffer) else { return nil }
+    public func actionFromNotificationResponse(response: UNNotificationResponse) -> Action? {
         
-        return offer
+        let userInfo = response.notification.request.content.userInfo
+        
+        if let encodedOffer = userInfo["offer"] as? String,
+            let offer = decodeOffer(encodedOffer: encodedOffer)  {
+            
+            return offer
+        }
+        
+        if let encodedUpdatePaymentDetails = userInfo["payment"] as? String,
+            let updatePaymentDetails = decodeUpdatePaymentDetails(encodedUpdatepaymentDetails: encodedUpdatePaymentDetails) {
+            
+            return updatePaymentDetails
+        }
+        
+        return nil
     }
     
+    
     @objc
-    public func offerFromUniversalLink(userActivity: NSUserActivity) -> Offer? {
+    public func actionFromUniversalLink(userActivity: NSUserActivity) -> Action? {
         
         // Get URL components from the incoming user activity
         guard userActivity.activityType == NSUserActivityTypeBrowsingWeb,
-           let incomingURL = userActivity.webpageURL,
-           let components = NSURLComponents(url: incomingURL, resolvingAgainstBaseURL: true) else {
-           return nil
+            let incomingURL = userActivity.webpageURL,
+            let components = NSURLComponents(url: incomingURL, resolvingAgainstBaseURL: true),
+            let params = components.queryItems else {
+                
+                return nil
         }
 
-        guard
-            let params = components.queryItems,
-            let offer = params.first(where: {$0.name == "offer"}),
+        if let offer = params.first(where: {$0.name == "offer"}),
             let encodedOffer = offer.value,
-            let decodedOffer = decodeOffer(encodedOffer: encodedOffer) else { return nil }
+            let decodedOffer = decodeOffer(encodedOffer: encodedOffer) {
+            
+            return decodedOffer
+        }
         
-        return decodedOffer
+        if let updatePaymentDetails = params.first(where: {$0.name == "payment"}),
+            let encodedUpdatePaymentDetails = updatePaymentDetails.value,
+            let decodedUpdatePaymentDetails = decodeUpdatePaymentDetails(encodedUpdatepaymentDetails: encodedUpdatePaymentDetails) {
+            
+            return decodedUpdatePaymentDetails
+        }
+        
+        return nil
     }
     
+    @available(iOS 12.2, *)
+    public func prepareOffer(usernameHash: String, productIdentifier: String, offerIdentifier: String, completion: @escaping(SKPaymentDiscount) -> Void) {
+
+        // Make a secure request to your server, providing the username, product, and discount data
+        // Your server will use these values to generate the signature and return it, along with the nonce, timestamp, and key identifier that it uses to generate the signature.
+        
+        let jsonObject = ["applicationUsername": usernameHash,
+                          "productIdentifier": productIdentifier,
+                          "offerIdentifier": offerIdentifier];
+        
+        if let json = try? JSONSerialization.data(withJSONObject: jsonObject, options: []) {
+
+//            let userId = userID()
+            if let url = URL(string: "https://api.churnfighter.io/subscriptionOfferSignature/2uUsRHeoRWLo61K0BU55")
+            {
+                httpPost(url: url, jsonData: json) { (data, urlResponse, error) in
+
+                    if let result = try? JSONSerialization.jsonObject(with: data!, options: []) as? [String:AnyObject],
+//                        let identifier = result["productIdentifier"] as? String,
+                        let keyIdentifier = result["keyIdentifier"] as? String,
+                        let nonceString = result["nonce"] as? String,
+                        let nonce = UUID(uuidString: nonceString) ,
+                        let signature = result["signature"] as? String,
+                        let timestamp = result["timestamp"] as? Int {
+
+                        let discountOffer = SKPaymentDiscount(identifier: offerIdentifier,
+                                                              keyIdentifier: keyIdentifier,
+                                                              nonce: nonce,
+                                                              signature: signature,
+                                                              timestamp: NSNumber(value: timestamp))
+                        completion(discountOffer)
+
+                    }
+                }
+            }
+        }
+    }
     
     // INTERNAL
     
@@ -147,7 +218,7 @@ public class ChurnFighter: NSObject {
         if let url = URL(string: "https://api.churnfighter.io/user/\(userId)"),
             let userInfoData = try?JSONEncoder().encode(userInfo) {
         
-            httpPost(url: url, jsonData: userInfoData)
+            httpPost(url: url, jsonData: userInfoData, completion: {_,_,_ in })
             userDefaults?.set(userHash, forKey: userHashKey)
         }
     }
@@ -174,7 +245,7 @@ public class ChurnFighter: NSObject {
             if let url = URL(string: "https://api.churnfighter.io/receipt/\(userId)")
             {
             
-                httpPost(url: url, jsonData: json)
+                httpPost(url: url, jsonData: json, completion: {_,_,_ in })
                 userDefaults?.setValue(receiptHash, forKey: receiptHashKey)
             }
         }
@@ -200,7 +271,7 @@ private extension ChurnFighter {
        }
     }
 
-    func httpPost(url: URL, jsonData: Data) {
+    func httpPost(url: URL, jsonData: Data, completion:  @escaping (Data?, URLResponse?, Error?) -> Void) {
         guard let apiKey=apiKey,
             let secret=secret,
             !jsonData.isEmpty else { return }
@@ -212,11 +283,7 @@ private extension ChurnFighter {
         request.addValue(secret, forHTTPHeaderField: "X-CF-header")
         request.addValue("application/json", forHTTPHeaderField: "Content-Type")
         
-        let task = URLSession.shared.dataTask(with: request, completionHandler: { (responseData: Data?, response: URLResponse?, error: Error?) in
-            if let error = error {
-                print(error.localizedDescription)
-            }
-        })
+        let task = URLSession.shared.dataTask(with: request, completionHandler:completion)
         task.resume()
     }
     
@@ -286,13 +353,22 @@ private extension ChurnFighter {
        
        return receiptData.base64EncodedString()
     }
-    
+
     func decodeOffer(encodedOffer: String) -> Offer? {
         
         guard let data = Data(base64Encoded: encodedOffer),
-//            let decodedOffer = String(data: data, encoding: .utf8),
-        let offer =  try? JSONDecoder().decode(Offer.self, from: data) else { return nil}
-        
+        let offer =  try? JSONDecoder().decode(Offer.self, from: data)
+        else { return nil }
+            
         return offer
+    }
+
+    func decodeUpdatePaymentDetails(encodedUpdatepaymentDetails: String) -> UpdatePaymentDetails? {
+        
+        guard let data = Data(base64Encoded: encodedUpdatepaymentDetails),
+            let updatePaymentDetails =  try? JSONDecoder().decode(UpdatePaymentDetails.self, from: data)
+        else { return nil }
+            
+        return updatePaymentDetails
     }
 }
